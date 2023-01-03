@@ -217,7 +217,30 @@ def show_cone(quad):
     quad_idx = temp_quad_idx
 
 
+# The actual area-based energy function to minimize
+def energy(i, position):
+    global target_positions, current_positions, mesh_dims
+    n_cols = mesh_dims[1]
+    # Iterate through top-left vertex indices of 4 quads in question
+    cost = 0.
+    for j in [i-n_cols-1, i-n_cols, i-1, i]:
+        corner_idxs = [j, j+n_cols, j+n_cols+1, j+1]  # counter-clockwise direction
+        area = 0.
+        target_area = 0.
+        for k in range(4):
+            v1, v2 = current_positions[corner_idxs[k]], current_positions[corner_idxs[(k+1) % 4]]
+            if corner_idxs[k] == i:
+                v1 = position
+            if corner_idxs[(k+1) % 4] == i:
+                v2 = position
+            area += np.linalg.det([v1, v2])  # shoelace theorem
+            v1, v2 = target_positions[corner_idxs[k]], target_positions[corner_idxs[(k+1) % 4]]
+            target_area += np.linalg.det([v1, v2])  # shoelace theorem
+        area = 0.5 * abs(area)
+        target_area = 0.5 * abs(target_area)
+        cost += np.power(area - target_area, 2.0)
 
+    return cost
 
 
 # Energy minimization step (goes ONCE through every vertex)
@@ -227,21 +250,21 @@ def minimize_step():
 
     # We iterate to the minimum vertex by vertex
     for i in range(n_verts):
-        # Target position and current position
-        v_target, v = target_positions[i], copy.copy(current_positions[i])
-        delta = None
-        alpha = 1.
-
+        # Current position
+        v = copy.copy(current_positions[i])
+        # Set a "target position" based on whether we're an interior or boundary vertex.
         # 1. If we're a boundary vertex, gradient direction is simply towards the target.
         n_cols = mesh_dims[1]
         if i % n_cols in [0, n_cols-1] or i < n_cols or i > n_verts - n_cols:
-            delta = v - v_target
+            v_target = target_positions[i]
 
         # 2. If we're an interior vertex, gradient direction is energy minimizing one.
         else:
-            delta = np.array([0, 0])
+            v_target = v
 
         # 3. Make the jump, and back-track line search as needed
+        delta = v - v_target
+        alpha = 1.
         current_positions[i] = v - (alpha * delta)
         transverse = False
         while alpha > 1e-6 and not transverse:
