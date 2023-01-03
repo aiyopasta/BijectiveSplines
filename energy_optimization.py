@@ -10,7 +10,7 @@
                    vertices which generated those.
 
     TODO: Modify the algorithm to be:
-            1. Iterate through all the vertices, and compute a gradient direction by:
+            1. Iterate through all the vertices, and compute a gradient direction:
             2. If it's a boundary vertex, use simple percentage-wise backtracking step.
             3. If it's an interior vertex, choose direction that minimizes difference between total area of
                all the quads that vertex affects in the target vs. current mesh.
@@ -145,6 +145,9 @@ def splice_transverse(splice):
     return True
 
 
+# Area based energy function
+# TODO
+
 # Repaint method
 def redraw():
     global target_positions, current_positions, mesh_dims, radius
@@ -214,22 +217,36 @@ def show_cone(quad):
     quad_idx = temp_quad_idx
 
 
-# Percentage-wise back-tracking line search based on criterion. TODO: We'll use this only for the boundary vertices.
-def simple_step():
+
+
+
+# Energy minimization step (goes ONCE through every vertex)
+def minimize_step():
     global target_positions, current_positions, mesh_dims, quad_idx, deg
+    n_verts = len(target_positions)
 
-    for i in range(len(target_positions)):
+    # We iterate to the minimum vertex by vertex
+    for i in range(n_verts):
+        # Target position and current position
         v_target, v = target_positions[i], copy.copy(current_positions[i])
-        # Move all the way
-        delta = v - v_target
+        delta = None
         alpha = 1.
-        current_positions[i] = v - (alpha * delta)
 
-        # Move "less all the way" if invalid
+        # 1. If we're a boundary vertex, gradient direction is simply towards the target.
+        n_cols = mesh_dims[1]
+        if i % n_cols in [0, n_cols-1] or i < n_cols or i > n_verts - n_cols:
+            delta = v - v_target
+
+        # 2. If we're an interior vertex, gradient direction is energy minimizing one.
+        else:
+            delta = np.array([0, 0])
+
+        # 3. Make the jump, and back-track line search as needed
+        current_positions[i] = v - (alpha * delta)
         transverse = False
         while alpha > 1e-6 and not transverse:
+            # Check if all splices have transverse (though clearly this is overkill)
             first = True
-            # Check if ALL windows have transverse. TODO: Though technically, we only gotta check a subset of subgrid this particular vertex affects right?
             transverse = True
             while first or quad_idx != 0:
                 first = False
@@ -239,7 +256,7 @@ def simple_step():
 
             # If not all windows transverse, then change alpha and position
             if not transverse:
-                print('Not all transverse for vertex', i, 'trying', alpha/2)
+                print('Not all transverse for vertex', i, 'trying', alpha / 2)
                 alpha /= 2
                 current_positions[i] = v - (alpha * delta)
 
@@ -289,7 +306,7 @@ def key_pressed(event):
     # For going to next optimization step
     elif event.char == ' ':
         print('Running algorithm again...')
-        simple_step()
+        minimize_step()
         redraw()
 
 
