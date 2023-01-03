@@ -2,26 +2,18 @@
     Goal: Iteratively modify an input mesh so that we are guaranteed (based on cone transversability criterion)
           that the resulting control points and B-spline surface is bijective.
 
-    Observations / Notes:
-    • Press any key to run an optimization step.
-    • To speed up convergence, dial up the 'n_epochs' parameter passed into Newton function.
-    • Dial up the 'perturb' variable for wacky mesh, which results in criteria not being satisfied.
-    • NOTE: If it says "Splice NOT transverse", that means taking a NEW newton step would have made it that way.
+    Spline review: A degree d B-spline basis function is supported on interval of length d+1, from [a, a+d+1], meaning
+                   it is supported on d+2 knots (i.e. a+0, a+1, a+2, ..., a+d, a+d+1). In 1D, there is 1 basis function
+                   per control point of the B-spline surface. Additionally, every point in the domain of the total 1D
+                   (padded) B-Spline curve lies in the support of d+1 basis functions. In 2D, this corresponds to
+                   (d+1) * (d+1) control points, which in turn, from our method, correspond to (d+2) * (d+2) mesh
+                   vertices which generated those.
 
-    TODO (in general):
-    • Rewrite using method in paper (no local "splices" just iterate over vertices and check tranversability of grids influencing current vertex
-      no hessian / gradient computation since these are computed by hand if energy is quadratic)
-        – Remember, the algo is simple: Jump target all the way to mesh, and if it is not satisfied, try small
-          percentage-wise distances from the beginning (varying alpha) to get proper distance that satisfies criterion.
-
-    • Figure out how to convert canvas to svg (see "canvasvg" library)
-    • Find 2 nice examples where original mesh is not transverse, and take cool screenshots showing iteration
-    • Background section (introduce B-splines, knots, and index relationship between ctrl pts and knots)
-
-    CREATE A NICE STEP BY STEP VISUALIZER TO SEE IF ALGORITHM WORKING PROPERLY.
-    That is, show cone after first big move, see if it is actually not transverse before moving it back.
-    Then at each division by 2, show the cone too.
-
+    TODO: Modify the algorithm to be:
+            1. Iterate through all the vertices, and compute a gradient direction by:
+            2. If it's a boundary vertex, use simple percentage-wise backtracking step.
+            3. If it's an interior vertex, choose direction that minimizes difference between total area of
+               all the quads that vertex affects in the target vs. current mesh.
 '''
 
 from tkinter import *
@@ -45,26 +37,27 @@ w.focus_set()
 w.configure(bg='white')
 w.pack()
 
-# Display Params
-radius = 5
-edgelen = 70  # edge lengths of target mesh before perturbation
-cone_radius = 200
+# Spline + Mesh Params
+deg = 3  # this is actually one plus the degree of the spline (i.e. deg = d+1)
+mesh_dims = np.array([deg+3, deg+3])  # Order is row, col. Sliding window will be of size deg+1 x deg+1 = d+2 x d+2
+perturb = 40  # used for randomly generating the target mesh vertex positions
 
-# Main Mesh / Spline Params
-deg = 3  # this is actually one plus the degree of the spline!
-mesh_dims = np.array([deg+3, deg+3])  # Order is row, col. Sliding window will be of size deg+1 x deg+1.
-perturb = 40
-
-# Mesh Data structure
-target_positions = np.zeros((int(mesh_dims[0] * mesh_dims[1]), 2))  # row0col0, row0col1, row0col2, ....
+# Mesh Data structure (Stored as: row0col0, row0col1, row0col2, ....)
+target_positions = np.zeros((int(mesh_dims[0] * mesh_dims[1]), 2))
 current_positions = np.zeros((int(mesh_dims[0] * mesh_dims[1]), 2))
 
 # Optimization Params
-quad_idx = 0  # Index in the "__-positions" arrays with top-left corner of next window to apply newton to.
+quad_idx = 0  # Index in the above arrays of top-left corner of next window to apply newton to. TODO: But we're not trying to optimize piece by piece.
 cone_quad = 0
 
+# Display Params
+radius = 5  # for displaying vertices
+edgelen = 70  # edge lengths of target mesh before perturbation
+cone_radius = 200
 
-# Minor Helper Functions
+
+# TODO: Is this needed anymore?
+# Increment the top-left corner of sliding window, modulo the index set of the mesh vertices.
 def increment_quad():
     global quad_idx, mesh_dims, deg
     if quad_idx % mesh_dims[1] < mesh_dims[1] - (deg+1):
@@ -76,6 +69,7 @@ def increment_quad():
             quad_idx = 0
 
 
+# Increment the top-left corner of the sliding cone-window, modulo the index set of the mesh vertices.
 def increment_cone_quad():
     global cone_quad, mesh_dims, deg
     if cone_quad % mesh_dims[1] < mesh_dims[1] - (deg+1):
@@ -87,6 +81,7 @@ def increment_cone_quad():
             cone_quad = 0
 
 
+# Given 1D index value, check whether it is in the sliding window given by top-left quad_idx corner.
 def in_quad(idx):
     global quad_idx, mesh_dims
     col_check = 0 <= (idx % mesh_dims[1]) - (quad_idx % mesh_dims[1]) <= deg
@@ -94,10 +89,9 @@ def in_quad(idx):
     return col_check and row_check
 
 
+# Given either "target_positions" or "current_positions" list, we return 1D list of points
+# within the window described by quad_idx.
 def full_to_splice(points):
-    '''
-        Return list of points within window described by quad_idx.
-    '''
     global quad_idx, mesh_dims, deg
     splice = []
     idx = quad_idx
@@ -111,6 +105,7 @@ def full_to_splice(points):
     return np.array(splice)
 
 
+# TODO: This is even needed?
 def splice_to_full(splice, full_points):
     global quad_idx, mesh_dims, deg
     idx = quad_idx
@@ -126,9 +121,9 @@ def splice_to_full(splice, full_points):
     return full_points
 
 
+# Given 1D list corresponding to a splice of the current_positions, check if it is transverse.
 def splice_transverse(splice):
     global mesh_dims, deg
-
     sign = None
     for row1 in range(deg+1):
         for col1 in range(deg):
@@ -154,8 +149,12 @@ def splice_transverse(splice):
 def redraw():
     global target_positions, current_positions, mesh_dims, radius
     w.delete('all')
+
     # Rewrite text
-    w.create_text(window_w / 2, window_h * 0.95, font='AvenirNext 20', text='Yellow=Target Mesh, Red=Current Mesh, Dark Red=Splice to be considered', fill='black')
+    w.create_text(window_w / 2, window_h * 0.95,
+                  font='AvenirNext 20',
+                  text='Yellow=Target Mesh, Red=Current Mesh, Dark Red=Splice to be considered',
+                  fill='black')
 
     # Draw mesh edges
     for i in range(len(target_positions)):
@@ -183,7 +182,7 @@ def redraw():
         w.create_oval(x-radius-r, y-radius-r, x+radius+r, y+radius+r, outline='black', fill=vcolor)
 
 
-# FOR DEBUGGING
+# Draw cone associated with a particular quad with top-left corner given by the input index "quad".
 def show_cone(quad):
     global current_positions, cone_radius, quad_idx
     temp_quad_idx = copy.copy(quad_idx)
@@ -215,7 +214,7 @@ def show_cone(quad):
     quad_idx = temp_quad_idx
 
 
-# Simpler step (just percentage-wise, as described in paper)
+# Percentage-wise back-tracking line search based on criterion. TODO: We'll use this only for the boundary vertices.
 def simple_step():
     global target_positions, current_positions, mesh_dims, quad_idx, deg
 
@@ -230,7 +229,7 @@ def simple_step():
         transverse = False
         while alpha > 1e-6 and not transverse:
             first = True
-            # Check if ALL windows have transverse
+            # Check if ALL windows have transverse. TODO: Though technically, we only gotta check a subset of subgrid this particular vertex affects right?
             transverse = True
             while first or quad_idx != 0:
                 first = False
@@ -245,60 +244,7 @@ def simple_step():
                 current_positions[i] = v - (alpha * delta)
 
 
-    # # Get only the relevant vertices (those inside window)
-    # target_splice = full_to_splice(target_positions)
-    # current_splice = full_to_splice(current_positions)
-    # # Vector to optimize
-    # target_v = np.reshape(target_splice, ((deg + 1) * (deg + 1) * 2))
-    # current_v = np.reshape(current_splice, ((deg + 1) * (deg + 1) * 2))
-    # # Simple Method
-    # current_v -= alpha * (current_v - target_v)
-    # # Convert vector back to positional data
-    # current_splice = np.reshape(current_v, ((deg + 1) * (deg + 1), 2))
-    # # Check if optimized splice violates our criteria
-    # if splice_transverse(current_splice):
-    #     print('Splice transverse.')
-    #     current_positions = splice_to_full(current_splice, current_positions)
-    #     return True
-    # else:
-    #     print('Splice NOT transverse! Trying', alpha / 2, '...')
-    #     return False
-
-
-# # Newton's method step
-# def newton_step(alpha):
-#     '''
-#         Run Newton step on current splice, with given alpha value.
-#         If our criterion is satisfied given the new positions, we actually perform the update and return True.
-#         If not, we return False. The caller must input a smaller alpha value if they want the criterion to be satisfied.
-#     '''
-#     global target_positions, current_positions, mesh_dims, quad_idx, deg
-#     # Get only the relevant vertices (those inside window)
-#     target_splice = full_to_splice(target_positions)
-#     current_splice = full_to_splice(current_positions)
-#     # Vector to optimize
-#     target_v = np.reshape(target_splice, ((deg+1) * (deg+1) * 2))
-#     current_v = np.reshape(current_splice, ((deg+1) * (deg+1) * 2))
-#     # Compute energy, gradient, Hessian
-#     energy = np.linalg.norm(target_v - current_v)
-#     print('Energy of quad', quad_idx, ':', energy)
-#     gradient = -2 * (target_v - current_v)
-#     hessian = np.diag(current_v)
-#     # Newton's Method
-#     current_v -= alpha * np.dot(np.linalg.inv(hessian), gradient)
-#     # Convert vector back to positional data
-#     current_splice = np.reshape(current_v, ((deg+1) * (deg+1), 2))
-#     # Check if optimized splice violates our criteria
-#     if splice_transverse(current_splice):
-#         print('Splice transverse.')
-#         current_positions = splice_to_full(current_splice, current_positions)
-#         return True
-#     else:
-#         print('Splice NOT transverse! Trying', alpha/2, '...')
-#         return False
-
-
-# 1. Generate target mesh vertices
+# 1. Randomly generate target mesh vertex positions
 mesh_mid = np.array([window_w/2, window_h/2])
 width, height = (mesh_dims[1] - 1) * edgelen, (mesh_dims[0] - 1) * edgelen
 for row in range(mesh_dims[0]):
@@ -308,7 +254,7 @@ for row in range(mesh_dims[0]):
         idx = (mesh_dims[1] * row) + col
         target_positions[idx] = [x, y]
 
-# 2. Initialize mesh vertices to optimize (initialize based on width/height of bounding box)
+# 2. Initialize optimization-mesh's vertices to regular grid given by bounding box of randomly generated target mesh
 max_x, min_x = max(target_positions[:, 0]), min(target_positions[:, 0])
 max_y, min_y = max(target_positions[:, 1]), min(target_positions[:, 1])
 edgelen = (abs(max_x - min_x) / (mesh_dims[1]-1), abs(max_y - min_y) / (mesh_dims[0]-1))  # tuple
@@ -319,29 +265,32 @@ for row in range(mesh_dims[0]):
         idx = int((mesh_dims[1] * row) + col)
         current_positions[idx] = [x, y]
 
-# 3. Draw Initial Configuration
+# 3. Draw initial mesh configuration
 redraw()
 
 
-# 4. Optimize + Redraw when key is pressed
+# Key controls
 img_num = 0
 def key_pressed(event):
     global cone_quad, img_num
 
+    # For sliding through splices to view its cone
     if event.char == 'd':
         print('Displaying cone:', cone_quad)
         show_cone(cone_quad)
         increment_cone_quad()
+
+    # For saving
     elif event.char == 's':
         canvasvg.saveall('mesh_image_'+str(img_num)+'.svg', w, items=None, margin=10, tounicode=None)
         print('Saved image.')
         img_num += 1
-    else:
+
+    # For going to next optimization step
+    elif event.char == ' ':
         print('Running algorithm again...')
         simple_step()
         redraw()
-
-
 
 
 # Key bind
