@@ -42,7 +42,7 @@ w.pack()
 # Spline + Mesh Params
 deg = 3  # this is actually one plus the degree of the spline (i.e. deg = d+1)
 mesh_dims = np.array([deg+2, deg+2])  # Order is row, col. Sliding window will be of size deg+1 x deg+1 = d+2 x d+2
-perturb = 40  # used for randomly generating the target mesh vertex positions
+perturb = 30  # used for randomly generating the target mesh vertex positions
 
 # Mesh Data structure (Stored as: row0col0, row0col1, row0col2, ....)
 target_positions = np.zeros((int(mesh_dims[0] * mesh_dims[1]), 2))
